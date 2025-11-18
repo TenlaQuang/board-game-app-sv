@@ -4,7 +4,6 @@ import time
 import random
 import uuid
 from typing import Dict, List, Optional
-
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -125,3 +124,53 @@ if __name__ == "__main__":
     # Lấy PORT từ biến môi trường của Render, mặc định là 10000 nếu không có
     port = int(os.environ.get("PORT", 10000))
     uvicorn.run(app, host="0.0.0.0", port=port)
+    # server.py (Cập nhật đoạn này vào file cũ hoặc thay thế)
+# ... (Các import cũ giữ nguyên) ...
+
+app = FastAPI()
+
+# ... (online_users, rooms giữ nguyên) ...
+
+# --- THÊM MỚI: LƯU LỜI MỜI ---
+# Cấu trúc: { "nguoi_nhan": { "from": "nguoi_gui", "room_id": "..." } }
+invites: Dict[str, Dict] = {} 
+
+class InviteRequest(BaseModel):
+    challenger: str # Người mời
+    target: str     # Người được mời
+    room_id: str
+
+# ... (Các API heartbeat, users, create-room, join-room GIỮ NGUYÊN) ...
+
+# --- THÊM 2 API MỚI NÀY XUỐNG DƯỚI ---
+
+@app.post("/send-invite")
+async def send_invite(req: InviteRequest):
+    """Gửi lời mời thách đấu"""
+    if req.target not in online_users:
+        raise HTTPException(status_code=404, detail="User offline")
+    
+    invites[req.target] = {
+        "from": req.challenger,
+        "room_id": req.room_id,
+        "timestamp": time.time()
+    }
+    print(f"[INVITE] {req.challenger} invited {req.target} to room {req.room_id}")
+    return {"status": "sent"}
+
+@app.get("/check-invite/{username}")
+async def check_invite(username: str):
+    """Kiểm tra xem mình có thư mời nào không"""
+    invite = invites.get(username)
+    if invite:
+        # Kiểm tra xem lời mời còn mới không (trong vòng 10s)
+        if time.time() - invite["timestamp"] < 10:
+            # Đọc xong xóa luôn để không bị mời lại liên tục
+            del invites[username]
+            return invite
+        else:
+            # Lời mời quá cũ, xóa đi
+            del invites[username]
+    return {"status": "none"}
+
+# ... (Phần main uvicorn giữ nguyên) ...
