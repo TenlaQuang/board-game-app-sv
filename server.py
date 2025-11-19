@@ -1,8 +1,8 @@
-# server.py (Bản FIX IP Radmin)
+# server.py (Đã hợp nhất logic IP Radmin và Game Type)
 import os
 import time
 import random
-from typing import Dict, Optional # Thêm Optional
+from typing import Dict, Optional
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -26,9 +26,8 @@ class UserSignal(BaseModel):
     username: str
     p2p_port: int
     ip: Optional[str] = None # <--- THÊM: IP Radmin/LAN
-    # game_type không bắt buộc ở heartbeat
 
-class CreateRoomRequest(BaseModel): # Mới
+class CreateRoomRequest(BaseModel): 
     username: str
     p2p_port: int
     game_type: str # 'chess' hoặc 'chinese_chess'
@@ -57,10 +56,10 @@ def cleanup_stale_data():
 @app.get("/")
 def read_root(): return {"status": "Server OK"}
 
-# --- SỬA API HEARTBEAT ---
+# --- SỬA API HEARTBEAT (Ưu tiên IP Radmin/Payload) ---
 @app.post("/heartbeat")
 async def heartbeat(user: UserSignal, request: Request):
-    # Ưu tiên lấy IP từ payload (IP Radmin)
+    # LẤY IP: Ưu tiên IP từ payload (IP Radmin), nếu không có thì lấy Public IP từ request
     client_ip = user.ip if user.ip else request.client.host 
     
     online_users[user.username] = {"ip": client_ip, "port": user.p2p_port, "last_seen": time.time()}
@@ -72,10 +71,10 @@ async def get_users():
     cleanup_stale_data()
     return [{"username": u} for u in online_users]
 
-# --- SỬA API TẠO PHÒNG ---
+# --- SỬA API TẠO PHÒNG (Ưu tiên IP Radmin/Payload) ---
 @app.post("/create-room")
 async def create_room(req: CreateRoomRequest, request: Request):
-    # Ưu tiên lấy IP từ payload (IP Radmin)
+    # LẤY IP: Ưu tiên IP từ payload (IP Radmin), nếu không có thì lấy Public IP từ request
     client_ip = req.ip if req.ip else request.client.host 
     
     room_id = str(random.randint(10000, 99999))
@@ -83,7 +82,7 @@ async def create_room(req: CreateRoomRequest, request: Request):
 
     rooms[room_id] = {
         "host_username": req.username,
-        "host_ip": client_ip, # LƯU IP RADMIN
+        "host_ip": client_ip, 
         "host_port": req.p2p_port,
         "game_type": req.game_type, 
         "created_at": time.time()
@@ -100,7 +99,7 @@ async def join_room(req: JoinRoomRequest):
     # Trả về IP đã được lưu (là IP Radmin)
     return {
         "status": "found",
-        "host_ip": room["host_ip"], # <--- TRẢ VỀ IP RADMIN
+        "host_ip": room["host_ip"], 
         "host_port": room["host_port"],
         "host_username": room["host_username"],
         "game_type": room.get("game_type", "chess") 
@@ -118,7 +117,6 @@ async def send_invite(req: InviteRequest):
         "game_type": req.game_type, 
         "timestamp": time.time()
     }
-    # KHÔNG CẦN LƯU IP Ở ĐÂY, IP HOST ĐÃ CÓ TRONG ROOM VÀ ONLINE_USERS
     return {"status": "sent"}
 
 @app.get("/check-invite/{username}")
