@@ -1,8 +1,8 @@
-# server.py (Bản nâng cấp hỗ trợ Loại Game)
+# server.py (Bản FIX IP Radmin)
 import os
 import time
 import random
-from typing import Dict
+from typing import Dict, Optional # Thêm Optional
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -21,16 +21,18 @@ online_users: Dict[str, Dict] = {}
 rooms: Dict[str, Dict] = {}
 invites: Dict[str, Dict] = {} 
 
-# --- MODELS MỚI: THÊM game_type ---
+# --- MODELS MỚI: THÊM ip OPTIONAL CHO TÍNH NĂNG RADMIN ---
 class UserSignal(BaseModel):
     username: str
     p2p_port: int
+    ip: Optional[str] = None # <--- THÊM: IP Radmin/LAN
     # game_type không bắt buộc ở heartbeat
 
 class CreateRoomRequest(BaseModel): # Mới
     username: str
     p2p_port: int
     game_type: str # 'chess' hoặc 'chinese_chess'
+    ip: Optional[str] = None # <--- THÊM: IP Radmin/LAN
 
 class JoinRoomRequest(BaseModel):
     username: str
@@ -40,7 +42,8 @@ class InviteRequest(BaseModel):
     challenger: str 
     target: str     
     room_id: str
-    game_type: str # Thêm cái này để người nhận biết
+    game_type: str 
+    ip: Optional[str] = None # <--- THÊM: IP Radmin/LAN
 
 # --- HELPERS GIỮ NGUYÊN ---
 def cleanup_stale_data():
@@ -54,11 +57,12 @@ def cleanup_stale_data():
 @app.get("/")
 def read_root(): return {"status": "Server OK"}
 
+# --- SỬA API HEARTBEAT ---
 @app.post("/heartbeat")
 async def heartbeat(user: UserSignal, request: Request):
-    client_ip = request.client.host
-    if request.headers.get("x-forwarded-for"):
-        client_ip = request.headers.get("x-forwarded-for").split(",")[0]
+    # Ưu tiên lấy IP từ payload (IP Radmin)
+    client_ip = user.ip if user.ip else request.client.host 
+    
     online_users[user.username] = {"ip": client_ip, "port": user.p2p_port, "last_seen": time.time()}
     cleanup_stale_data()
     return {"status": "ok"}
@@ -71,18 +75,17 @@ async def get_users():
 # --- SỬA API TẠO PHÒNG ---
 @app.post("/create-room")
 async def create_room(req: CreateRoomRequest, request: Request):
-    client_ip = request.client.host
-    if request.headers.get("x-forwarded-for"):
-        client_ip = request.headers.get("x-forwarded-for").split(",")[0]
-
+    # Ưu tiên lấy IP từ payload (IP Radmin)
+    client_ip = req.ip if req.ip else request.client.host 
+    
     room_id = str(random.randint(10000, 99999))
     while room_id in rooms: room_id = str(random.randint(10000, 99999))
 
     rooms[room_id] = {
         "host_username": req.username,
-        "host_ip": client_ip,
+        "host_ip": client_ip, # LƯU IP RADMIN
         "host_port": req.p2p_port,
-        "game_type": req.game_type, # Lưu loại game
+        "game_type": req.game_type, 
         "created_at": time.time()
     }
     print(f"[ROOM] {room_id} ({req.game_type}) by {req.username}")
@@ -94,10 +97,10 @@ async def join_room(req: JoinRoomRequest):
     room = rooms.get(req.room_id)
     if not room: raise HTTPException(status_code=404, detail="Room not found")
     
-    # Trả về thêm game_type để Client biết mà load bàn cờ
+    # Trả về IP đã được lưu (là IP Radmin)
     return {
         "status": "found",
-        "host_ip": room["host_ip"],
+        "host_ip": room["host_ip"], # <--- TRẢ VỀ IP RADMIN
         "host_port": room["host_port"],
         "host_username": room["host_username"],
         "game_type": room.get("game_type", "chess") 
@@ -112,9 +115,10 @@ async def send_invite(req: InviteRequest):
     invites[req.target] = {
         "from": req.challenger,
         "room_id": req.room_id,
-        "game_type": req.game_type, # Gửi kèm loại game
+        "game_type": req.game_type, 
         "timestamp": time.time()
     }
+    # KHÔNG CẦN LƯU IP Ở ĐÂY, IP HOST ĐÃ CÓ TRONG ROOM VÀ ONLINE_USERS
     return {"status": "sent"}
 
 @app.get("/check-invite/{username}")
