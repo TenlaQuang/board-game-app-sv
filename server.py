@@ -25,12 +25,14 @@ invites: Dict[str, Dict] = {}
 class UserSignal(BaseModel):
     username: str
     p2p_port: int
+    ip: str | None = None
     # game_type không bắt buộc ở heartbeat
 
-class CreateRoomRequest(BaseModel): # Mới
+class CreateRoomRequest(BaseModel):
     username: str
     p2p_port: int
-    game_type: str # 'chess' hoặc 'chinese_chess'
+    game_type: str
+    ip: str | None = None  # <-- THÊM DÒNG NÀY
 
 class JoinRoomRequest(BaseModel):
     username: str
@@ -56,10 +58,21 @@ def read_root(): return {"status": "Server OK"}
 
 @app.post("/heartbeat")
 async def heartbeat(user: UserSignal, request: Request):
-    client_ip = request.client.host
-    if request.headers.get("x-forwarded-for"):
-        client_ip = request.headers.get("x-forwarded-for").split(",")[0]
-    online_users[user.username] = {"ip": client_ip, "port": user.p2p_port, "last_seen": time.time()}
+    # IP client gửi lên từ web_matchmaking
+    client_ip = user.dict().get("ip")  # <-- LẤY IP RADMIN TỪ JSON
+
+    if not client_ip:
+        # Fallback: lấy IP từ request (KHÔNG DÙNG RADMIN)
+        client_ip = request.client.host
+        if request.headers.get("x-forwarded-for"):
+            client_ip = request.headers.get("x-forwarded-for").split(",")[0]
+
+    online_users[user.username] = {
+        "ip": client_ip,
+        "port": user.p2p_port,
+        "last_seen": time.time()
+    }
+
     cleanup_stale_data()
     return {"status": "ok"}
 
@@ -71,21 +84,25 @@ async def get_users():
 # --- SỬA API TẠO PHÒNG ---
 @app.post("/create-room")
 async def create_room(req: CreateRoomRequest, request: Request):
-    client_ip = request.client.host
-    if request.headers.get("x-forwarded-for"):
-        client_ip = request.headers.get("x-forwarded-for").split(",")[0]
+    # IP client gửi từ client app
+    client_ip = req.dict().get("ip")
+
+    if not client_ip:
+        client_ip = request.client.host
+        if request.headers.get("x-forwarded-for"):
+            client_ip = request.headers.get("x-forwarded-for").split(",")[0]
 
     room_id = str(random.randint(10000, 99999))
-    while room_id in rooms: room_id = str(random.randint(10000, 99999))
+    while room_id in rooms:
+        room_id = str(random.randint(10000, 99999))
 
     rooms[room_id] = {
         "host_username": req.username,
-        "host_ip": client_ip,
+        "host_ip": client_ip,   # <---- LƯU IP RADMIN VÀO ĐÂY
         "host_port": req.p2p_port,
-        "game_type": req.game_type, # Lưu loại game
+        "game_type": req.game_type,
         "created_at": time.time()
     }
-    print(f"[ROOM] {room_id} ({req.game_type}) by {req.username}")
     return {"room_id": room_id}
 
 # --- SỬA API VÀO PHÒNG ---
