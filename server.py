@@ -1,4 +1,4 @@
-# server.py (Bản nâng cấp: Lưu trạng thái Lobby để chặn mời chéo)
+# server.py (Bản Hoàn Chỉnh - Fix lỗi thiếu hàm)
 import os
 import time
 import random
@@ -26,7 +26,7 @@ class UserSignal(BaseModel):
     username: str
     p2p_port: int
     ip: Optional[str] = None 
-    lobby_state: str = "menu" # <--- MỚI: Lưu trạng thái (chess/chinese_chess/menu)
+    lobby_state: str = "menu"
 
 class CreateRoomRequest(BaseModel): 
     username: str
@@ -45,14 +45,12 @@ class InviteRequest(BaseModel):
     game_type: str 
     ip: Optional[str] = None
 
-# --- HELPERS ---
+# --- HELPERS (ĐÃ BỔ SUNG) ---
 def cleanup_stale_data():
     now = time.time()
-    # Xóa user offline quá 15s
     expired_users = [u for u, data in online_users.items() if now - data['last_seen'] > 15]
     for u in expired_users: del online_users[u]
     
-    # Xóa phòng quá 30 phút
     expired_rooms = [rid for rid, r in rooms.items() if now - r['created_at'] > 1800]
     for rid in expired_rooms: del rooms[rid]
 
@@ -60,35 +58,27 @@ def cleanup_stale_data():
 @app.get("/")
 def read_root(): return {"status": "Server OK"}
 
-# --- 1. HEARTBEAT (CẬP NHẬT ĐỂ LƯU TRẠNG THÁI) ---
 @app.post("/heartbeat")
 async def heartbeat(user: UserSignal, request: Request):
-    # Ưu tiên IP Radmin
     client_ip = user.ip if user.ip else request.client.host 
     
     online_users[user.username] = {
         "ip": client_ip,
         "port": user.p2p_port,
         "last_seen": time.time(),
-        "lobby_state": user.lobby_state # <--- LƯU TRẠNG THÁI VÀO DB
+        "lobby_state": user.lobby_state
     }
     cleanup_stale_data()
     return {"status": "ok"}
 
-# --- 2. GET USERS (CẬP NHẬT ĐỂ TRẢ VỀ TRẠNG THÁI) ---
 @app.get("/users")
 async def get_users():
     cleanup_stale_data()
-    # Trả về danh sách kèm theo lobby_state để Client biết đường mà chặn
     return [
-        {
-            "username": u, 
-            "lobby_state": data.get("lobby_state", "menu") 
-        } 
+        {"username": u, "lobby_state": data.get("lobby_state", "menu")} 
         for u, data in online_users.items()
     ]
 
-# --- CÁC API KHÁC GIỮ NGUYÊN ---
 @app.post("/create-room")
 async def create_room(req: CreateRoomRequest, request: Request):
     client_ip = req.ip if req.ip else request.client.host 
@@ -143,10 +133,9 @@ async def check_invite(username: str):
             del invites[username]
     return {"status": "none"}
 
-# API để Client báo đã chấp nhận (Optional, để mở rộng sau này)
+# API chấp nhận lời mời (Optional)
 @app.post("/accept-invite/{username}/{room_id}")
 async def accept_invite(username: str, room_id: str):
-    # Có thể dùng để log hoặc thông báo cho Host biết
     return {"status": "accepted"}
 
 if __name__ == "__main__":
