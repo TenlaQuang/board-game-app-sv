@@ -1,4 +1,4 @@
-# server.py (Bản Hoàn Chỉnh, ưu tiên IP Radmin và Fix Pydantic)
+# server.py (Bản nâng cấp: Lưu trạng thái Lobby để chặn mời chéo)
 import os
 import time
 import random
@@ -21,11 +21,12 @@ online_users: Dict[str, Dict] = {}
 rooms: Dict[str, Dict] = {}
 invites: Dict[str, Dict] = {} 
 
-# --- MODELS MỚI: ĐÃ THÊM IP OPTIONAL (FIX LỖI) ---
+# --- MODELS ---
 class UserSignal(BaseModel):
     username: str
     p2p_port: int
     ip: Optional[str] = None 
+    lobby_state: str = "menu" # <--- MỚI: Lưu trạng thái (chess/chinese_chess/menu)
 
 class CreateRoomRequest(BaseModel): 
     username: str
@@ -42,14 +43,16 @@ class InviteRequest(BaseModel):
     target: str     
     room_id: str
     game_type: str 
-    ip: Optional[str] = None # <--- Dòng này đã được fix
-# --------------------------------------------------
+    ip: Optional[str] = None
 
-# --- HELPERS GIỮ NGUYÊN ---
+# --- HELPERS ---
 def cleanup_stale_data():
     now = time.time()
+    # Xóa user offline quá 15s
     expired_users = [u for u, data in online_users.items() if now - data['last_seen'] > 15]
     for u in expired_users: del online_users[u]
+    
+    # Xóa phòng quá 30 phút
     expired_rooms = [rid for rid, r in rooms.items() if now - r['created_at'] > 1800]
     for rid in expired_rooms: del rooms[rid]
 
@@ -57,25 +60,37 @@ def cleanup_stale_data():
 @app.get("/")
 def read_root(): return {"status": "Server OK"}
 
-# --- SỬA API HEARTBEAT (Ưu tiên IP Radmin/Payload) ---
+# --- 1. HEARTBEAT (CẬP NHẬT ĐỂ LƯU TRẠNG THÁI) ---
 @app.post("/heartbeat")
 async def heartbeat(user: UserSignal, request: Request):
-    # LẤY IP: Ưu tiên IP từ payload (IP Radmin)
+    # Ưu tiên IP Radmin
     client_ip = user.ip if user.ip else request.client.host 
     
-    online_users[user.username] = {"ip": client_ip, "port": user.p2p_port, "last_seen": time.time()}
+    online_users[user.username] = {
+        "ip": client_ip,
+        "port": user.p2p_port,
+        "last_seen": time.time(),
+        "lobby_state": user.lobby_state # <--- LƯU TRẠNG THÁI VÀO DB
+    }
     cleanup_stale_data()
     return {"status": "ok"}
 
+# --- 2. GET USERS (CẬP NHẬT ĐỂ TRẢ VỀ TRẠNG THÁI) ---
 @app.get("/users")
 async def get_users():
     cleanup_stale_data()
-    return [{"username": u} for u in online_users]
+    # Trả về danh sách kèm theo lobby_state để Client biết đường mà chặn
+    return [
+        {
+            "username": u, 
+            "lobby_state": data.get("lobby_state", "menu") 
+        } 
+        for u, data in online_users.items()
+    ]
 
-# --- SỬA API TẠO PHÒNG (Ưu tiên IP Radmin/Payload) ---
+# --- CÁC API KHÁC GIỮ NGUYÊN ---
 @app.post("/create-room")
 async def create_room(req: CreateRoomRequest, request: Request):
-    # LẤY IP: Ưu tiên IP từ payload (IP Radmin)
     client_ip = req.ip if req.ip else request.client.host 
     
     room_id = str(random.randint(10000, 99999))
@@ -91,13 +106,11 @@ async def create_room(req: CreateRoomRequest, request: Request):
     print(f"[ROOM] {room_id} ({req.game_type}) by {req.username}")
     return {"room_id": room_id}
 
-# --- SỬA API VÀO PHÒNG ---
 @app.post("/join-room")
 async def join_room(req: JoinRoomRequest):
     room = rooms.get(req.room_id)
     if not room: raise HTTPException(status_code=404, detail="Room not found")
     
-    # Trả về IP đã được lưu (là IP Radmin)
     return {
         "status": "found",
         "host_ip": room["host_ip"], 
@@ -106,7 +119,6 @@ async def join_room(req: JoinRoomRequest):
         "game_type": room.get("game_type", "chess") 
     }
 
-# --- SỬA API MỜI ---
 @app.post("/send-invite")
 async def send_invite(req: InviteRequest):
     if req.target not in online_users:
@@ -130,6 +142,12 @@ async def check_invite(username: str):
         else:
             del invites[username]
     return {"status": "none"}
+
+# API để Client báo đã chấp nhận (Optional, để mở rộng sau này)
+@app.post("/accept-invite/{username}/{room_id}")
+async def accept_invite(username: str, room_id: str):
+    # Có thể dùng để log hoặc thông báo cho Host biết
+    return {"status": "accepted"}
 
 if __name__ == "__main__":
     import uvicorn
