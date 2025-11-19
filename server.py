@@ -1,4 +1,4 @@
-# server.py (Đã hợp nhất logic IP Radmin và Game Type)
+# server.py (Bản Hoàn Chỉnh, ưu tiên IP Radmin và Fix Pydantic)
 import os
 import time
 import random
@@ -21,17 +21,17 @@ online_users: Dict[str, Dict] = {}
 rooms: Dict[str, Dict] = {}
 invites: Dict[str, Dict] = {} 
 
-# --- MODELS MỚI: THÊM ip OPTIONAL CHO TÍNH NĂNG RADMIN ---
+# --- MODELS MỚI: ĐÃ THÊM IP OPTIONAL (FIX LỖI) ---
 class UserSignal(BaseModel):
     username: str
     p2p_port: int
-    ip: Optional[str] = None # <--- THÊM: IP Radmin/LAN
+    ip: Optional[str] = None 
 
 class CreateRoomRequest(BaseModel): 
     username: str
     p2p_port: int
-    game_type: str # 'chess' hoặc 'chinese_chess'
-    ip: Optional[str] = None # <--- THÊM: IP Radmin/LAN
+    game_type: str
+    ip: Optional[str] = None 
 
 class JoinRoomRequest(BaseModel):
     username: str
@@ -42,7 +42,8 @@ class InviteRequest(BaseModel):
     target: str     
     room_id: str
     game_type: str 
-    ip: Optional[str] = None # <--- THÊM: IP Radmin/LAN
+    ip: Optional[str] = None # <--- Dòng này đã được fix
+# --------------------------------------------------
 
 # --- HELPERS GIỮ NGUYÊN ---
 def cleanup_stale_data():
@@ -59,7 +60,7 @@ def read_root(): return {"status": "Server OK"}
 # --- SỬA API HEARTBEAT (Ưu tiên IP Radmin/Payload) ---
 @app.post("/heartbeat")
 async def heartbeat(user: UserSignal, request: Request):
-    # LẤY IP: Ưu tiên IP từ payload (IP Radmin), nếu không có thì lấy Public IP từ request
+    # LẤY IP: Ưu tiên IP từ payload (IP Radmin)
     client_ip = user.ip if user.ip else request.client.host 
     
     online_users[user.username] = {"ip": client_ip, "port": user.p2p_port, "last_seen": time.time()}
@@ -74,7 +75,7 @@ async def get_users():
 # --- SỬA API TẠO PHÒNG (Ưu tiên IP Radmin/Payload) ---
 @app.post("/create-room")
 async def create_room(req: CreateRoomRequest, request: Request):
-    # LẤY IP: Ưu tiên IP từ payload (IP Radmin), nếu không có thì lấy Public IP từ request
+    # LẤY IP: Ưu tiên IP từ payload (IP Radmin)
     client_ip = req.ip if req.ip else request.client.host 
     
     room_id = str(random.randint(10000, 99999))
